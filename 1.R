@@ -10,168 +10,19 @@ library(DT)
 library(shinyjs)
 library(scales)
 library(RColorBrewer)
-library(tidyr)
 
-# Helper function for null coalescing
-`%||%` <- function(a, b) if (is.null(a) || is.na(a)) b else a
+# Generate dummy data
+set.seed(123)
 
-# Data loading function
-load_eicv_data <- function() {
-  # Excel file path
-  excel_path <- "E:/Personal File/Data analysis Trianing/Great Project/EIVC_NISR_Project-2/EICV7_Tables_MainIndicatorReport2.xlsx"
-  
-  # Poverty data from Table9.3
-  poverty_data <- tryCatch({
-    poverty_raw <- read_excel(excel_path, sheet = "Table 9.3", skip = 1)
-    
-    poverty_clean <- poverty_raw %>%
-      filter(
-        !is.na(.[[1]]),  # Filter out empty rows
-        !grepl("CI:", .[[1]], ignore.case = TRUE),  # Remove confidence interval rows
-        grepl("Rwanda|Kigali|South|West|North|East|Urban|Rural", .[[1]], ignore.case = TRUE)
-      ) %>%
-      select(Region = 1, Poverty_Rate_2024 = 2, Extreme_Poverty_2024 = 5) %>%
-      mutate(
-        Poverty_Rate_2024 = as.numeric(Poverty_Rate_2024),
-        Extreme_Poverty_2024 = as.numeric(Extreme_Poverty_2024)
-      ) %>%
-      filter(!is.na(Poverty_Rate_2024))
-    
-    poverty_clean
-  }, error = function(e) {
-    message("Error reading Table 9.3: ", e$message)
-    NULL
-  })
-  
-  
-  # Education data from Table 4.6
-  education_data <- read_excel(excel_path, sheet = "Table A4.8 and Table A4.9", skip = 2) %>%
-    filter(
-      !is.na(.[[1]]) & 
-        grepl("Primary|Secondary|Tertiary|Higher|University|No Education", .[[1]], ignore.case = TRUE)
-    ) %>%
-    slice(1:4) %>%
-    mutate(
-      Level = c("Primary", "Secondary", "Tertiary", "No Education"),
-      Urban = as.numeric(.[[2]]),
-      Rural = as.numeric(.[[3]]),
-      Male = as.numeric(.[[4]]),
-      Female = as.numeric(.[[5]])
-    ) %>%
-    select(Level, Urban, Rural, Male, Female) %>%
-    filter(!is.na(Urban))
-  
-  # Health data from Table A3.7 and A3.6
-  tryCatch({
-    # Read from sheets
-    health_raw_1 <- read_excel(excel_path, sheet = "Table A3.7", skip = 1)
-    health_raw_2 <- read_excel(excel_path, sheet = "Table A3.6", skip = 1)
-    
-    # Extract values safely with fallback
-    insurance_coverage <- suppressWarnings(as.numeric(health_raw_1[1, 2]))
-    access_healthcare  <- suppressWarnings(as.numeric(health_raw_2[1, 2]))
-    
-    health_data <- data.frame(
-      Indicator = c(
-        "Health Insurance Coverage", 
-        "Access to Healthcare", 
-        "Child Mortality (per 1000)", 
-        "Maternal Mortality (per 100,000)"
-      ),
-      Value = c(
-        ifelse(is.na(insurance_coverage), 87.5, insurance_coverage),
-        ifelse(is.na(access_healthcare), 78.3, access_healthcare),
-        32,
-        248
-      ),
-      Urban = c(92.1, 85.6, 28, 210),
-      Rural = c(85.8, 75.2, 34, 265)
-    )
-    
-  }, error = function(e) {
-    message("Error reading health data from Excel. Using default values.")
-    
-    health_data <<- data.frame(
-      Indicator = c(
-        "Health Insurance Coverage", 
-        "Access to Healthcare", 
-        "Child Mortality (per 1000)", 
-        "Maternal Mortality (per 100,000)"
-      ),
-      Value = c(87.5, 78.3, 32, 248),
-      Urban = c(92.1, 85.6, 28, 210),
-      Rural = c(85.8, 75.2, 34, 265)
-    )
-  })
-  
-  # Housing data from Table 5.6, 5.8, 5.19
-  tryCatch({
-    housing_raw_1 <- read_excel(excel_path, sheet = "Table 5.6", skip = 1)
-    housing_raw_2 <- read_excel(excel_path, sheet = "Table 5.8", skip = 1) 
-    housing_raw_3 <- read_excel(excel_path, sheet = "Table 5.19", skip = 1)
-    
-    housing_data <- data.frame(
-      Type = c("Electricity", "Clean Water", "Improved Sanitation", "Internet Access"),
-      Urban = c(
-        as.numeric(housing_raw_1[1, 2]) %||% 96.5,
-        as.numeric(housing_raw_2[1, 2]) %||% 89.2,
-        as.numeric(housing_raw_3[1, 2]) %||% 87.4,
-        65.3
-      ),
-      Rural = c(
-        as.numeric(housing_raw_1[1, 3]) %||% 45.8,
-        as.numeric(housing_raw_2[1, 3]) %||% 72.1,
-        as.numeric(housing_raw_3[1, 3]) %||% 68.9,
-        18.7
-      ),
-      National = c(58.9, 76.8, 74.2, 32.4)
-    )
-  }, error = function(e) {
-    housing_data <<- data.frame(
-      Type = c("Electricity", "Clean Water", "Improved Sanitation", "Internet Access"),
-      Urban = c(96.5, 89.2, 87.4, 65.3),
-      Rural = c(45.8, 72.1, 68.9, 18.7),
-      National = c(58.9, 76.8, 74.2, 32.4)
-    )
-  })
-  
-  # Demographics data from TableA.1
-  demographics_raw <- read_excel(excel_path, sheet = "TableA.1", skip = 1)
-  demographics_data <- demographics_raw %>%
-    filter(!is.na(.[[1]]) & grepl("0-14|15-24|25-34|35-44|45-54|55-64|65", 
-                                  .[[1]], ignore.case = TRUE)) %>%
-    slice(1:7) %>%
-    mutate(
-      Age_Group = c("0-14", "15-24", "25-34", "35-44", "45-54", "55-64", "65+"),
-      Male = as.numeric(.[[2]]),
-      Female = as.numeric(.[[3]]),
-      Population_Pct = as.numeric(.[[4]])
-    ) %>%
-    select(Age_Group, Male, Female, Population_Pct) %>%
-    filter(!is.na(Male))
-  
-  return(list(
-    poverty = poverty_data,
-    education = education_data,
-    health = health_data,
-    housing = housing_data,
-    demographics = demographics_data
-  ))
-}
+# Poverty data
+poverty_data <- data.frame(
+  Province = c("Kigali", "Southern", "Western", "Northern", "Eastern"),
+  Poverty_Rate = c(12.3, 45.6, 38.2, 42.1, 39.8),
+  Extreme_Poverty = c(3.2, 18.4, 15.6, 17.2, 16.1),
+  Gini_Coefficient = c(0.42, 0.38, 0.41, 0.39, 0.40)
+)
 
-# Load data (wrap in try-catch for safety)
-tryCatch({
-  eicv_data <- load_eicv_data()
-  poverty_data <- eicv_data$poverty
-  education_data <- eicv_data$education
-  health_data <- eicv_data$health
-  housing_data <- eicv_data$housing
-  demographics_data <- eicv_data$demographics
-}, error = function(e) {
-  
-})
-
-# Keep dummy employment and agriculture data as requested
+# Employment data
 employment_data <- data.frame(
   Sector = c("Agriculture", "Industry", "Services", "Public Sector"),
   Employment_Rate = c(68.5, 12.3, 15.8, 3.4),
@@ -179,15 +30,48 @@ employment_data <- data.frame(
   Female = c(71.8, 9.5, 15.4, 3.3)
 )
 
+# Education data
+education_data <- data.frame(
+  Level = c("Primary", "Secondary", "Tertiary", "No Education"),
+  Urban = c(85.6, 42.3, 18.7, 8.2),
+  Rural = c(78.9, 28.4, 6.3, 18.5),
+  Male = c(82.1, 36.8, 13.9, 12.4),
+  Female = c(81.8, 33.2, 10.8, 14.8)
+)
+
+# Health data
+health_data <- data.frame(
+  Indicator = c("Health Insurance Coverage", "Access to Healthcare", 
+                "Child Mortality (per 1000)", "Maternal Mortality (per 100,000)"),
+  Value = c(87.5, 78.3, 32, 248),
+  Urban = c(92.1, 85.6, 28, 210),
+  Rural = c(85.8, 75.2, 34, 265)
+)
+
+# Housing data
+housing_data <- data.frame(
+  Type = c("Electricity", "Clean Water", "Improved Sanitation", "Internet Access"),
+  Urban = c(96.5, 89.2, 87.4, 65.3),
+  Rural = c(45.8, 72.1, 68.9, 18.7),
+  National = c(58.9, 76.8, 74.2, 32.4)
+)
+
+# Agriculture data
 agriculture_data <- data.frame(
   Crop = c("Beans", "Maize", "Sweet Potato", "Irish Potato", "Rice", "Coffee"),
   Production_MT = c(485000, 520000, 890000, 1200000, 95000, 28000),
   Households_Pct = c(78.5, 65.3, 82.1, 45.6, 12.8, 35.2)
 )
 
+# Demographics data
+demographics_data <- data.frame(
+  Age_Group = c("0-14", "15-24", "25-34", "35-44", "45-54", "55-64", "65+"),
+  Male = c(20.1, 12.8, 11.5, 9.2, 7.8, 5.4, 4.2),
+  Female = c(19.8, 13.2, 12.1, 9.8, 8.1, 5.8, 4.8),
+  Population_Pct = c(39.9, 26.0, 23.6, 19.0, 15.9, 11.2, 9.0)
+)
 
-
-# UI (keeping the beautiful interface exactly as before)
+# UI
 ui <- fluidPage(
   useShinyjs(),
   tags$head(
@@ -261,19 +145,19 @@ ui <- fluidPage(
                             column(4,
                                    div(class = "metric-box",
                                        h4("National Poverty Rate"),
-                                       div(class = "metric-value", paste0(round(poverty_data$Poverty_Rate[1], 1), "%"))
+                                       div(class = "metric-value", "35.4%")
                                    )
                             ),
                             column(4,
                                    div(class = "metric-box",
                                        h4("Extreme Poverty"),
-                                       div(class = "metric-value", paste0(round(poverty_data$Extreme_Poverty[1], 1), "%"))
+                                       div(class = "metric-value", "14.1%")
                                    )
                             ),
                             column(4,
                                    div(class = "metric-box",
                                        h4("Gini Coefficient"),
-                                       div(class = "metric-value", round(poverty_data$Gini_Coefficient[1], 2))
+                                       div(class = "metric-value", "0.40")
                                    )
                             )
                           ),
@@ -335,19 +219,19 @@ ui <- fluidPage(
                             column(3,
                                    div(class = "metric-box",
                                        h4("Primary Completion"),
-                                       div(class = "metric-value", paste0(round(education_data$Urban[1], 1), "%"))
+                                       div(class = "metric-value", "81.9%")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Secondary Enrollment"),
-                                       div(class = "metric-value", paste0(round(education_data$Urban[2], 1), "%"))
+                                       div(class = "metric-value", "35.4%")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Tertiary Access"),
-                                       div(class = "metric-value", paste0(round(education_data$Urban[3], 1), "%"))
+                                       div(class = "metric-value", "12.4%")
                                    )
                             )
                           ),
@@ -366,25 +250,25 @@ ui <- fluidPage(
                             column(3,
                                    div(class = "metric-box",
                                        h4("Insurance Coverage"),
-                                       div(class = "metric-value", paste0(health_data$Value[1], "%"))
+                                       div(class = "metric-value", "87.5%")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Healthcare Access"),
-                                       div(class = "metric-value", paste0(health_data$Value[2], "%"))
+                                       div(class = "metric-value", "78.3%")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Child Mortality"),
-                                       div(class = "metric-value", paste0(health_data$Value[3], "/1000"))
+                                       div(class = "metric-value", "32/1000")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Maternal Mortality"),
-                                       div(class = "metric-value", paste0(health_data$Value[4], "/100k"))
+                                       div(class = "metric-value", "248/100k")
                                    )
                             )
                           ),
@@ -403,25 +287,25 @@ ui <- fluidPage(
                             column(3,
                                    div(class = "metric-box",
                                        h4("Electricity Access"),
-                                       div(class = "metric-value", paste0(housing_data$National[1], "%"))
+                                       div(class = "metric-value", "58.9%")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Clean Water"),
-                                       div(class = "metric-value", paste0(housing_data$National[2], "%"))
+                                       div(class = "metric-value", "76.8%")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Sanitation"),
-                                       div(class = "metric-value", paste0(housing_data$National[3], "%"))
+                                       div(class = "metric-value", "74.2%")
                                    )
                             ),
                             column(3,
                                    div(class = "metric-box",
                                        h4("Internet Access"),
-                                       div(class = "metric-value", paste0(housing_data$National[4], "%"))
+                                       div(class = "metric-value", "32.4%")
                                    )
                             )
                           ),
@@ -509,17 +393,21 @@ ui <- fluidPage(
   )
 )
 
+
+
+
+
 # Server
 server <- function(input, output, session) {
   
   # Poverty plots
   output$poverty_plot <- renderPlotly({
-    p <- ggplot(poverty_data[-1,], aes(x = EICV7, y = Poverty_Rate, fill = EICV7)) +
+    p <- ggplot(poverty_data, aes(x = Province, y = Poverty_Rate, fill = Province)) +
       geom_col() +
       scale_fill_brewer(palette = "Blues") +
       labs(title = "Poverty Rate by Province", y = "Poverty Rate (%)", x = "") +
       theme_minimal() +
-      theme(legend.position = "none", axis.text.x = element_text(angle = 45))
+      theme(legend.position = "none")
     ggplotly(p)
   })
   
@@ -527,7 +415,7 @@ server <- function(input, output, session) {
     DT::datatable(poverty_data, options = list(pageLength = 10, dom = 't'))
   })
   
-  # Employment plots (keeping dummy data as requested)
+  # Employment plots
   output$employment_plot <- renderPlotly({
     p <- ggplot(employment_data, aes(x = Sector, y = Employment_Rate, fill = Sector)) +
       geom_col() +
@@ -541,7 +429,7 @@ server <- function(input, output, session) {
   output$employment_gender_plot <- renderPlotly({
     emp_gender <- employment_data %>%
       select(Sector, Male, Female) %>%
-      pivot_longer(cols = c(Male, Female), names_to = "Gender", values_to = "Rate")
+      tidyr::pivot_longer(cols = c(Male, Female), names_to = "Gender", values_to = "Rate")
     
     p <- ggplot(emp_gender, aes(x = Sector, y = Rate, fill = Gender)) +
       geom_col(position = "dodge") +
@@ -556,7 +444,7 @@ server <- function(input, output, session) {
   output$education_plot <- renderPlotly({
     edu_long <- education_data %>%
       select(Level, Urban, Rural) %>%
-      pivot_longer(cols = c(Urban, Rural), names_to = "Area", values_to = "Rate")
+      tidyr::pivot_longer(cols = c(Urban, Rural), names_to = "Area", values_to = "Rate")
     
     p <- ggplot(edu_long, aes(x = Level, y = Rate, fill = Area)) +
       geom_col(position = "dodge") +
@@ -590,7 +478,7 @@ server <- function(input, output, session) {
   output$housing_plot <- renderPlotly({
     housing_long <- housing_data %>%
       select(Type, Urban, Rural) %>%
-      pivot_longer(cols = c(Urban, Rural), names_to = "Area", values_to = "Access")
+      tidyr::pivot_longer(cols = c(Urban, Rural), names_to = "Area", values_to = "Access")
     
     p <- ggplot(housing_long, aes(x = Type, y = Access, fill = Area)) +
       geom_col(position = "dodge") +
@@ -608,7 +496,7 @@ server <- function(input, output, session) {
       addMarkers(lng = 30.0619, lat = -1.9403, popup = "Kigali - Urban Center")
   })
   
-  # Agriculture plots (keeping dummy data as requested)
+  # Agriculture plots
   output$agriculture_plot <- renderPlotly({
     p <- ggplot(agriculture_data, aes(x = reorder(Crop, Production_MT), y = Production_MT/1000, fill = Crop)) +
       geom_col() +
@@ -638,7 +526,7 @@ server <- function(input, output, session) {
   output$age_pyramid <- renderPlotly({
     demo_pyramid <- demographics_data %>%
       select(Age_Group, Male, Female) %>%
-      pivot_longer(cols = c(Male, Female), names_to = "Gender", values_to = "Percentage") %>%
+      tidyr::pivot_longer(cols = c(Male, Female), names_to = "Gender", values_to = "Percentage") %>%
       mutate(Percentage = ifelse(Gender == "Male", -Percentage, Percentage))
     
     p <- ggplot(demo_pyramid, aes(x = Age_Group, y = Percentage, fill = Gender)) +
